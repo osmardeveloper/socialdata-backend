@@ -36,7 +36,7 @@ exports.createStaff = async (req, res) => {
 // @access  Private/Admin
 exports.updateStaff = async (req, res) => {
   try {
-    const staff = await UsuarioStaff.findById(req.params.id);
+    const staff = await UsuarioStaff.findById(req.params.id).select('+password');
 
     if (!staff) {
       return res.status(404).json({ message: 'Staff no encontrado' });
@@ -47,12 +47,12 @@ exports.updateStaff = async (req, res) => {
     if (nombre) staff.nombre = nombre;
     if (usuario) staff.usuario = usuario;
     if (rol) staff.rol = rol;
-    if (password) {
-      const salt = await bcrypt.genSalt(10);
-      staff.password = await bcrypt.hash(password, salt);
-    }
+    // Asignar en texto plano: el pre-save hook se encarga del hash
+    if (password) staff.password = password;
 
     const updatedStaff = await staff.save();
+    // No devolver el campo password en la respuesta
+    updatedStaff.password = undefined;
     res.json(updatedStaff);
   } catch (error) {
     res.status(400).json({ message: error.message });

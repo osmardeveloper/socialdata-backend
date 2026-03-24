@@ -24,9 +24,9 @@ const usuarioStaffSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Encriptar contraseña antes de guardar
-usuarioStaffSchema.pre('save', async function (next) {
+usuarioStaffSchema.pre('save', async function () {
   if (!this.isModified('password')) {
-    return next(); // Sin return, el código seguía ejecutándose y hasheaba undefined
+    return;
   }
 
   const salt = await bcrypt.genSalt(10);
