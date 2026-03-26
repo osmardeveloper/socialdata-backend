@@ -1,37 +1,60 @@
-const UsuarioStaff = require('../models/UsuarioStaff');
-const jwt = require('jsonwebtoken');
+/**
+ * controllers/authController.js  (DUAL: MongoDB / SQLite)
+ * 
+ * Gestiona el login tanto online como offline.
+ */
 
-// Generate JWT
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: '30d',
-  });
-};
+const jwt          = require('jsonwebtoken');
+const bcrypt       = require('bcryptjs');
+const StaffSQLite  = require('../sqlite/models/sqliteStaff');
+const UsuarioStaff = require('../models/UsuarioStaff');
+const connectivity = require('../services/connectivityService');
+
+// ─────────────────────────────────────────
+// HELPER
+// ─────────────────────────────────────────
+
+const generateToken = (id) =>
+  jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '30d' });
+
+// ─────────────────────────────────────────
+// CONTROLADORES
+// ─────────────────────────────────────────
 
 // @desc    Registrar nuevo usuario staff
 // @route   POST /api/auth/register
-// @access  Public (solo para iniciar sistema o Admin)
-// Nota: en producción, esto podría ser privado solo para admin.
+// @access  Public (Admin en producción)
 exports.registerUser = async (req, res) => {
   const { nombre, usuario, password, rol } = req.body;
 
   try {
-    // Check if user exists
-    const userExists = await UsuarioStaff.findOne({ usuario });
+    if (!connectivity.isOnline()) {
+      // Registro offline en SQLite
+      const existing = StaffSQLite.findByUsuario(usuario);
+      if (existing) return res.status(400).json({ message: 'El usuario ya existe' });
 
-    if (userExists) {
-      return res.status(400).json({ message: 'El usuario ya existe' });
+      const user = await StaffSQLite.create({ nombre, usuario, password, rol });
+      return res.status(201).json({
+        _id: user.id,
+        nombre: user.nombre,
+        usuario: user.usuario,
+        rol: user.rol,
+        token: generateToken(user.id),
+        offline: true,
+      });
     }
 
-    // Create user
-    const user = await UsuarioStaff.create({
-      nombre,
-      usuario,
-      password,
-      rol: rol || 'encuestador',
-    });
+    // Online → MongoDB
+    const userExists = await UsuarioStaff.findOne({ usuario });
+    if (userExists) return res.status(400).json({ message: 'El usuario ya existe' });
+
+    const user = await UsuarioStaff.create({ nombre, usuario, password, rol: rol || 'encuestador' });
 
     if (user) {
+      // Cachear localmente para login offline futuro
+      const userWithPw = await UsuarioStaff.findById(user._id).select('+password');
+      if (userWithPw) StaffSQLite.upsertFromMongo(user.toObject(), userWithPw.password);
+
       res.status(201).json({
         _id: user._id,
         nombre: user.nombre,
@@ -39,8 +62,6 @@ exports.registerUser = async (req, res) => {
         rol: user.rol,
         token: generateToken(user._id),
       });
-    } else {
-      res.status(400).json({ message: 'Datos de usuario inválidos' });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -54,20 +75,48 @@ exports.loginUser = async (req, res) => {
   const { usuario, password } = req.body;
 
   try {
-    // Verificar por email
+    // ── MODO OFFLINE: buscar en SQLite ──────────────────────────
+    if (!connectivity.isOnline()) {
+      const staffLocal = StaffSQLite.findByUsuario(usuario);
+
+      if (!staffLocal) {
+        return res.status(401).json({
+          message: 'Usuario no encontrado en caché local. (Debes loguearte online al menos una vez)',
+        });
+      }
+
+      const match = await bcrypt.compare(password, staffLocal.password);
+      if (!match) return res.status(401).json({ message: 'Credenciales inválidas' });
+
+      const tokenId = staffLocal.mongo_id || staffLocal.id;
+
+      return res.json({
+        _id: tokenId,
+        nombre: staffLocal.nombre,
+        usuario: staffLocal.usuario,
+        rol: staffLocal.rol,
+        token: generateToken(tokenId),
+        offline: true,
+      });
+    }
+
+    // ── MODO ONLINE: buscar en MongoDB ──────────────────────────
     const user = await UsuarioStaff.findOne({ usuario }).select('+password');
 
     if (user && (await user.matchPassword(password))) {
-      res.json({
+      // Actualizar caché local
+      StaffSQLite.upsertFromMongo(user.toObject(), user.password);
+
+      return res.json({
         _id: user._id,
         nombre: user.nombre,
         usuario: user.usuario,
         rol: user.rol,
         token: generateToken(user._id),
       });
-    } else {
-      res.status(401).json({ message: 'Credenciales inválidas' });
     }
+
+    res.status(401).json({ message: 'Credenciales inválidas' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -78,8 +127,7 @@ exports.loginUser = async (req, res) => {
 // @access  Private
 exports.getMe = async (req, res) => {
   try {
-    const user = await UsuarioStaff.findById(req.user.id);
-    res.json(user);
+    res.json(req.user);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

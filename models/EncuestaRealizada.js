@@ -3,7 +3,11 @@ const mongoose = require('mongoose');
 const respuestaSchema = new mongoose.Schema({
   pregunta_id: {
     type: mongoose.Schema.Types.ObjectId, // Match con el _id del detalle dentro de Pregunta
-    required: true
+    required: false // Permitir nulo para sub-preguntas dinámicas
+  },
+  pregunta_nombre: {
+    type: String, // Identificador por nombre para sub-preguntas
+    required: false
   },
   respuesta: {
     type: mongoose.Schema.Types.Mixed,

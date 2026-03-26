@@ -3,3 +3,7 @@ node_modules/
 logs/
 *.log
 dist/
+
+# SQLite local (cada dispositivo tiene su propia copia)
+data/
+*.sqlite

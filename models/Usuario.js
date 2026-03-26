@@ -48,6 +48,15 @@ const usuarioSchema = new mongoose.Schema({
   fecha_nacimiento: {
     type: Date,
     required: [true, 'La fecha de nacimiento es obligatoria']
+  },
+  edad: {
+    type: Number,
+    required: false
+  },
+  grupo_familiar_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'GrupoFamiliar',
+    default: null
   }
 }, { timestamps: true });
 
