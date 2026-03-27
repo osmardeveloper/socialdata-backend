@@ -2,25 +2,25 @@
 const dotenv = require('dotenv');
 dotenv.config();
 
-const express  = require('express');
-const cors     = require('cors');
-const morgan   = require('morgan');
+const express = require('express');
+const cors = require('cors');
+const morgan = require('morgan');
 
 // ─── Inicializar SQLite ANTES que cualquier otra cosa ─────────────────────────
 // (crea tablas si no existen)
 require('./sqlite/db.sqlite');
 
-const connectDB        = require('./db');
-const connectivity     = require('./services/connectivityService');
-const syncService      = require('./services/syncService');
+const connectDB = require('./db');
+const connectivity = require('./services/connectivityService');
+const syncService = require('./services/syncService');
 
-const authRoutes       = require('./routes/authRoutes');
-const staffRoutes      = require('./routes/staffRoutes');
-const usuarioRoutes    = require('./routes/usuarioRoutes');
-const preguntaRoutes   = require('./routes/preguntaRoutes');
+const authRoutes = require('./routes/authRoutes');
+const staffRoutes = require('./routes/staffRoutes');
+const usuarioRoutes = require('./routes/usuarioRoutes');
+const preguntaRoutes = require('./routes/preguntaRoutes');
 const formularioRoutes = require('./routes/formularioRoutes');
-const encuestaRoutes   = require('./routes/encuestaRoutes');
-const statusRoutes     = require('./routes/statusRoutes');
+const encuestaRoutes = require('./routes/encuestaRoutes');
+const statusRoutes = require('./routes/statusRoutes');
 const grupoFamiliarRoutes = require('./routes/grupoFamiliarRoutes');
 
 // ─── Conectar MongoDB (no-blocking: arranca aunque falle) ─────────────────────
@@ -39,14 +39,14 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 // ─── Rutas ───────────────────────────────────────────────────────────────────
-app.use('/api/auth',        authRoutes);
-app.use('/api/staff',       staffRoutes);
-app.use('/api/usuarios',    usuarioRoutes);
-app.use('/api/preguntas',   preguntaRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/staff', staffRoutes);
+app.use('/api/usuarios', usuarioRoutes);
+app.use('/api/preguntas', preguntaRoutes);
 app.use('/api/formularios', formularioRoutes);
-app.use('/api/encuestas',   encuestaRoutes);
+app.use('/api/encuestas', encuestaRoutes);
 app.use('/api/grupos-familiares', grupoFamiliarRoutes);
-app.use('/api/status',      statusRoutes);
+app.use('/api/status', statusRoutes);
 
 // Health-check
 app.get('/', (req, res) => {
@@ -58,7 +58,7 @@ app.get('/', (req, res) => {
 
 // ─── Arrancar servidor ───────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n🚀 SocialData API corriendo en puerto ${PORT}`);
   console.log(`   Entorno : ${process.env.NODE_ENV || 'development'}`);
   console.log(`   SQLite  : backend/data/socialdata.sqlite`);

@@ -101,7 +101,12 @@ exports.loginUser = async (req, res) => {
     }
 
     // ── MODO ONLINE: buscar en MongoDB ──────────────────────────
-    const user = await UsuarioStaff.findOne({ usuario }).select('+password');
+    let user = null;
+    try {
+      user = await UsuarioStaff.findOne({ usuario }).select('+password').maxTimeMS(5000); // 5s timeout
+    } catch (mongoErr) {
+      console.warn('[Auth Controller] MongoDB falló o tardó demasiado, reintentando via SQLite...', mongoErr.message);
+    }
 
     if (user && (await user.matchPassword(password))) {
       // Actualizar caché local
@@ -114,6 +119,24 @@ exports.loginUser = async (req, res) => {
         rol: user.rol,
         token: generateToken(user._id),
       });
+    }
+
+    // ── REINTENTO EN SQLITE (si Mongo falló o no existe el usuario online) ──
+    const staffLocal = StaffSQLite.findByUsuario(usuario);
+    if (staffLocal) {
+      const match = await bcrypt.compare(password, staffLocal.password);
+      if (match) {
+        const tokenId = staffLocal.mongo_id || staffLocal.id;
+        console.log(`[Auth Controller] Login exitoso vía SQLite (tras fallo/ausencia en Mongo) para: ${usuario}`);
+        return res.json({
+          _id: tokenId,
+          nombre: staffLocal.nombre,
+          usuario: staffLocal.usuario,
+          rol: staffLocal.rol,
+          token: generateToken(tokenId),
+          offline: true, // Avisar al frontend que estamos "fallbackeando"
+        });
+      }
     }
 
     res.status(401).json({ message: 'Credenciales inválidas' });
