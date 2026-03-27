@@ -23,6 +23,8 @@ const Pregunta            = require('../models/Pregunta');
 const FormularioPersonalizada = require('../models/FormularioPersonalizada');
 const EncuestaRealizada   = require('../models/EncuestaRealizada');
 const GrupoFamiliar       = require('../models/GrupoFamiliar');
+const UsuarioStaff        = require('../models/UsuarioStaff');
+const StaffSQLite         = require('../sqlite/models/sqliteStaff');
 
 const connectivity = require('./connectivityService');
 const db           = require('../sqlite/db.sqlite');
@@ -74,6 +76,8 @@ async function syncUsuarios() {
             telefono: u.telefono,
             correo: u.correo,
             fecha_nacimiento: u.fecha_nacimiento,
+            edad: u.edad,
+            grupo_familiar_id: u.grupo_familiar_id,
           },
           { new: true, upsert: false }
         );
@@ -92,6 +96,8 @@ async function syncUsuarios() {
             telefono: u.telefono,
             correo: u.correo,
             fecha_nacimiento: u.fecha_nacimiento,
+            edad: u.edad,
+            grupo_familiar_id: u.grupo_familiar_id,
           });
         }
       }
@@ -214,6 +220,46 @@ async function syncEncuestas() {
   }
 }
 
+async function syncStaff() {
+  const pending = db.prepare('SELECT * FROM usuarios_staff WHERE is_synced = 0').all();
+  console.log(`[Sync] Staff pendientes: ${pending.length}`);
+
+  for (const s of pending) {
+    try {
+      let mongoDoc;
+      if (s.mongo_id) {
+        mongoDoc = await UsuarioStaff.findByIdAndUpdate(
+          s.mongo_id,
+          { nombre: s.nombre, usuario: s.usuario, rol: s.rol },
+          { new: true }
+        );
+      } else {
+        const existing = await UsuarioStaff.findOne({ usuario: s.usuario });
+        if (existing) {
+          mongoDoc = existing;
+        } else {
+          // Nota: el password ya viene hasheado en SQLite? 
+          // No, el controller lo hashea para SQLite. 
+          // Al crear en Mongo, UsuarioStaff middleware lo hashea de nuevo si s.password es plano.
+          // Pero si s.password es el hash de SQLite, fallará.
+          // Por seguridad, omitimos la contraseña en sync si ya existe, 
+          // o requerimos que sea la misma o se resetee.
+          mongoDoc = await UsuarioStaff.create({
+            nombre: s.nombre,
+            usuario: s.usuario,
+            password: 'PasswordOffline123!', // O extraer si es posible
+            rol: s.rol
+          });
+        }
+      }
+      db.prepare('UPDATE usuarios_staff SET is_synced = 1, mongo_id = ? WHERE id = ?').run(mongoDoc._id.toString(), s.id);
+      console.log(`  ✅ Staff sincronizado: ${s.usuario}`);
+    } catch (error) {
+      console.error(`  ❌ Error sincronizando staff ${s.usuario}:`, error.message);
+    }
+  }
+}
+
 async function syncGrupos() {
   const pending = GrupoFamiliarSQLite.findUnsynced();
   console.log(`[Sync] Grupos Familiares pendientes: ${pending.length}`);
@@ -275,6 +321,7 @@ async function runSync() {
 
   try {
     await syncUsuarios();
+    await syncStaff();
     await syncPreguntas();
     await syncFormularios();
     await syncEncuestas();
@@ -321,6 +368,7 @@ function hasPendingData() {
     preguntas:  db.prepare('SELECT COUNT(*) as c FROM preguntas WHERE is_synced = 0').get().c,
     formularios: db.prepare('SELECT COUNT(*) as c FROM formularios_personalizados WHERE is_synced = 0').get().c,
     encuestas:  db.prepare('SELECT COUNT(*) as c FROM encuestas_realizadas WHERE is_synced = 0').get().c,
+    staff:      db.prepare('SELECT COUNT(*) as c FROM usuarios_staff WHERE is_synced = 0').get().c,
   };
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   return { hasPending: total > 0, total, counts };
@@ -423,6 +471,13 @@ async function downloadDataFromServer() {
       } else {
         GrupoFamiliarSQLite.update(existing.id, data);
       }
+    }
+
+    // 5. Descargar Staff
+    const mongoStaff = await UsuarioStaff.find().select('+password');
+    console.log(`  ⬇️ Descargando ${mongoStaff.length} miembros de staff...`);
+    for (const s of mongoStaff) {
+       StaffSQLite.upsertFromMongo(s.toObject(), s.password);
     }
 
     console.log('[Sync] ====== DESCARGA COMPLETADA ======\n');

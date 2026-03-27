@@ -118,13 +118,16 @@ db.exec(`
   );
 `);
 
-// MIGRACIÓN: Intentar añadir columna 'edad' si no existe (para DBs existentes)
+// MIGRACIÓN: Intentar añadir columnas si no existen (para DBs existentes)
 try {
   db.prepare('ALTER TABLE usuarios ADD COLUMN edad INTEGER').run();
   console.log('[SQLite Migrations] Columna "edad" añadida a la tabla "usuarios"');
-} catch (e) {
-  // Si ya existe la columna, tirará error 'duplicate column name: edad'
-}
+} catch (e) { /* Ya existe edad */ }
+
+try {
+  db.prepare('ALTER TABLE usuarios ADD COLUMN grupo_familiar_id TEXT').run();
+  console.log('[SQLite Migrations] Columna "grupo_familiar_id" añadida a la tabla "usuarios"');
+} catch (e) { /* Ya existe grupo_familiar_id */ }
 
 console.log(`[SQLite] Base de datos lista en: ${DB_PATH}`);
 

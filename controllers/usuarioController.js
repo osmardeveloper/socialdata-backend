@@ -23,6 +23,8 @@ function normalizeSQLite(u) {
     telefono: u.telefono,
     correo: u.correo,
     fecha_nacimiento: u.fecha_nacimiento,
+    edad: u.edad,
+    grupo_familiar_id: u.grupo_familiar_id,
     isSynced: !!u.is_synced,
     createdAt: u.created_at,
     updatedAt: u.updated_at,
@@ -33,16 +35,22 @@ function normalizeSQLite(u) {
 // CONTROLADORES
 // ──────────────────────────────────────────────────────────
 
-// @desc    Obtener todos los usuarios encuestados
-// @route   GET /api/usuarios
-// @access  Private
 exports.getUsuarios = async (req, res) => {
   try {
-    if (req.db.mode === 'sqlite') {
-      const usuarios = req.db.Usuario.findAll().map(normalizeSQLite);
-      return res.json(usuarios);
+    if (req.db.mode === 'mongo') {
+      try {
+        const usuarios = await req.db.Usuario.find().maxTimeMS(3000);
+        return res.json(usuarios);
+      } catch (err) {
+        console.warn('[UsuarioController] Falló Mongo, usando SQLite de respaldo...', err.message);
+      }
     }
-    const usuarios = await req.db.Usuario.find();
+
+    // Backup o modo explicito SQLite
+    const usuarios = req.db.mode === 'mongo' 
+      ? require('../sqlite/models/sqliteUsuario').findAll().map(normalizeSQLite)
+      : req.db.Usuario.findAll().map(normalizeSQLite);
+    
     res.json(usuarios);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -58,37 +66,42 @@ exports.buscarPorDocumento = async (req, res) => {
     if (!numero_documento)
       return res.status(400).json({ message: 'Parámetro numero_documento requerido' });
 
-    if (req.db.mode === 'sqlite') {
-      const u = req.db.Usuario.findByNumeroDocumento(numero_documento);
-      if (!u) return res.status(404).json({ message: 'No encontrado' });
-      return res.json(normalizeSQLite(u));
+    if (req.db.mode === 'mongo') {
+      try {
+        const usuario = await req.db.Usuario.findOne({ numero_documento }).maxTimeMS(2000);
+        if (usuario) return res.json(usuario);
+      } catch (err) {
+        console.warn('[UsuarioController] Falló búsqueda en Mongo, intentando SQLite...', err.message);
+      }
     }
 
-    const usuario = await req.db.Usuario.findOne({ numero_documento });
-    if (!usuario) return res.status(404).json({ message: 'No encontrado' });
-    res.json(usuario);
+    // Fallback SQLite
+    const u = require('../sqlite/models/sqliteUsuario').findByNumeroDocumento(numero_documento);
+    if (!u) return res.status(404).json({ message: 'No encontrado' });
+    res.json(normalizeSQLite(u));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Crear un nuevo usuario encuestado
-// @route   POST /api/usuarios
-// @access  Private
 exports.createUsuario = async (req, res) => {
   try {
-    if (req.db.mode === 'sqlite') {
-      // Verificar duplicado local
-      const existing = req.db.Usuario.findByNumeroDocumento(req.body.numero_documento);
-      if (existing)
-        return res.status(400).json({ message: 'Ya existe un usuario con ese número de documento' });
-
-      const nuevo = req.db.Usuario.create(req.body);
-      return res.status(201).json(normalizeSQLite(nuevo));
+    if (req.db.mode === 'mongo') {
+      try {
+         const usuario = await req.db.Usuario.create(req.body);
+         return res.status(201).json(usuario);
+      } catch (err) {
+         console.warn('[UsuarioController] Falló creación en Mongo, guardando en SQLite...', err.message);
+      }
     }
 
-    const usuario = await req.db.Usuario.create(req.body);
-    res.status(201).json(usuario);
+    // Modo SQLite o Fallback
+    const sqliteModel = req.db.mode === 'sqlite' ? req.db.Usuario : require('../sqlite/models/sqliteUsuario');
+    const existing = sqliteModel.findByNumeroDocumento(req.body.numero_documento);
+    if (existing) return res.status(400).json({ message: 'Ya existe un usuario con ese número de documento' });
+
+    const nuevo = sqliteModel.create(req.body);
+    res.status(201).json(normalizeSQLite(nuevo));
   } catch (error) {
     res.status(400).json({ message: error.message });
   }

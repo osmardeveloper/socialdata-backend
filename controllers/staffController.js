@@ -33,12 +33,19 @@ function normalizeStaff(s) {
 // @access  Private/Admin
 exports.getStaff = async (req, res) => {
   try {
-    if (req.db.mode === 'sqlite') {
-      const staff = req.db.Staff.findAll();
-      return res.json(staff.map(normalizeStaff));
+    if (req.db.mode === 'mongo') {
+      try {
+        const staff = await req.db.Staff.find().maxTimeMS(3000);
+        return res.json(staff);
+      } catch (err) {
+        console.warn('[StaffController] Falló Mongo, usando SQLite...', err.message);
+      }
     }
-    const staff = await req.db.Staff.find();
-    res.json(staff);
+
+    // SQLite mode o fallback
+    const staffModel = req.db.mode === 'sqlite' ? req.db.Staff : require('../sqlite/models/sqliteStaff');
+    const staff = staffModel.findAll();
+    res.json(staff.map(normalizeStaff));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

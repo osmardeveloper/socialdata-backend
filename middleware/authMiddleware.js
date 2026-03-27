@@ -20,31 +20,36 @@ exports.protect = async (req, res, next) => {
       token = req.headers.authorization.split(' ')[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+      let userFound = null;
+
       if (connectivity.isOnline()) {
-        // ONLINE: intentar MongoDB, sino SQLite
-        req.user = await UsuarioStaff.findById(decoded.id).select('-password');
-        if (!req.user) {
-          const local = StaffSQLite.findById(decoded.id);
-          if (local) req.user = { 
+        try {
+          // ONLINE: intentar MongoDB con timeout rápido
+          userFound = await UsuarioStaff.findById(decoded.id).select('-password').maxTimeMS(2000);
+        } catch (dbErr) {
+          console.warn('[Auth Middleware] Mongo falló, intentando SQLite...', dbErr.message);
+        }
+      }
+
+      // Si no online o falló Mongo, buscar en SQLite
+      if (!userFound) {
+        const local = StaffSQLite.findById(decoded.id);
+        if (local) {
+          userFound = { 
             _id: local.mongo_id || local.id, 
             nombre: local.nombre, 
             usuario: local.usuario, 
-            rol: local.rol 
+            rol: local.rol,
+            fromSQLite: true
           };
         }
-      } else {
-        // OFFLINE: siempre SQLite
-        const local = StaffSQLite.findById(decoded.id);
-        if (local) req.user = { 
-          _id: local.mongo_id || local.id, 
-          nombre: local.nombre, 
-          usuario: local.usuario, 
-          rol: local.rol 
-        };
       }
 
-      if (!req.user) return res.status(401).json({ message: 'No autorizado, usuario no encontrado' });
+      if (!userFound) {
+        return res.status(401).json({ message: 'No autorizado, usuario no encontrado' });
+      }
 
+      req.user = userFound;
       next();
     } catch (error) {
       console.error('[Auth Error]', error.message);

@@ -12,6 +12,10 @@ const MONGO_OPTIONS = {
   family: 4,
 };
 
+// CRÍTICO: No bufferear comandos si Mongo no está listo
+mongoose.set('bufferCommands', false);
+
+
 const connectDB = async () => {
   try {
     const conn = await mongoose.connect(process.env.MONGO_URI, MONGO_OPTIONS);
