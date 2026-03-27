@@ -75,69 +75,58 @@ exports.loginUser = async (req, res) => {
   const { usuario, password } = req.body;
 
   try {
-    // ── MODO OFFLINE: buscar en SQLite ──────────────────────────
-    if (!connectivity.isOnline()) {
-      const staffLocal = StaffSQLite.findByUsuario(usuario);
-
-      if (!staffLocal) {
-        return res.status(401).json({
-          message: 'Usuario no encontrado en caché local. (Debes loguearte online al menos una vez)',
-        });
-      }
-
-      const match = await bcrypt.compare(password, staffLocal.password);
-      if (!match) return res.status(401).json({ message: 'Credenciales inválidas' });
-
-      const tokenId = staffLocal.mongo_id || staffLocal.id;
-
-      return res.json({
-        _id: tokenId,
-        nombre: staffLocal.nombre,
-        usuario: staffLocal.usuario,
-        rol: staffLocal.rol,
-        token: generateToken(tokenId),
-        offline: true,
-      });
-    }
-
-    // ── MODO ONLINE: buscar en MongoDB ──────────────────────────
-    let user = null;
-    try {
-      user = await UsuarioStaff.findOne({ usuario }).select('+password').maxTimeMS(5000); // 5s timeout
-    } catch (mongoErr) {
-      console.warn('[Auth Controller] MongoDB falló o tardó demasiado, reintentando via SQLite...', mongoErr.message);
-    }
-
-    if (user && (await user.matchPassword(password))) {
-      // Actualizar caché local
-      StaffSQLite.upsertFromMongo(user.toObject(), user.password);
-
-      return res.json({
-        _id: user._id,
-        nombre: user.nombre,
-        usuario: user.usuario,
-        rol: user.rol,
-        token: generateToken(user._id),
-      });
-    }
-
-    // ── REINTENTO EN SQLITE (si Mongo falló o no existe el usuario online) ──
+    // ── ESTRATEGIA OPTIMIZADA: Probar SQLite Primero (Fast-Path) ───
+    // Buscamos en la base de datos local (SQLite). Si el usuario ya existe y las 
+    // credenciales coinciden, entramos inmediatamente (<100ms).
     const staffLocal = StaffSQLite.findByUsuario(usuario);
     if (staffLocal) {
       const match = await bcrypt.compare(password, staffLocal.password);
       if (match) {
         const tokenId = staffLocal.mongo_id || staffLocal.id;
-        console.log(`[Auth Controller] Login exitoso vía SQLite (tras fallo/ausencia en Mongo) para: ${usuario}`);
+        console.log(`[Auth Controller] Login Ultra-Rápido via SQLite para: ${usuario}`);
+        
+        // Si estamos "online", lanzamos una actualización silenciosa de la caché en segundo plano
+        if (connectivity.isOnline()) {
+          UsuarioStaff.findOne({ usuario }).select('+password').then(u => {
+            if (u) StaffSQLite.upsertFromMongo(u.toObject(), u.password);
+          }).catch(() => {});
+        }
+
         return res.json({
           _id: tokenId,
           nombre: staffLocal.nombre,
           usuario: staffLocal.usuario,
           rol: staffLocal.rol,
           token: generateToken(tokenId),
-          offline: true, // Avisar al frontend que estamos "fallbackeando"
+          offline: !connectivity.isOnline(),
         });
       }
     }
+
+    // ── FALLBACK A MONGODB: (Si no está en SQLite o la password local es distinta) ──
+    if (connectivity.isOnline()) {
+      try {
+        console.log(`[Auth Controller] Usuario no encontrado/inválido en SQLite, intentando MongoDB para: ${usuario}...`);
+        const user = await UsuarioStaff.findOne({ usuario }).select('+password').maxTimeMS(4000);
+
+        if (user && (await user.matchPassword(password))) {
+          // Actualizar caché local para la próxima vez
+          StaffSQLite.upsertFromMongo(user.toObject(), user.password);
+
+          return res.json({
+            _id: user._id,
+            nombre: user.nombre,
+            usuario: user.usuario,
+            rol: user.rol,
+            token: generateToken(user._id),
+          });
+        }
+      } catch (mongoErr) {
+        console.error('[Auth Controller] Error crítico en MongoDB:', mongoErr.message);
+      }
+    }
+
+    res.status(401).json({ message: 'Credenciales inválidas' });
 
     res.status(401).json({ message: 'Credenciales inválidas' });
   } catch (error) {
